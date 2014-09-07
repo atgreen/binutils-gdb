@@ -61,6 +61,10 @@
 #include "frame-unwind.h"
 #include "frame-base.h"
 
+#include "record.h"
+#include "record-full.h"
+#include "opcode/ppc.h"
+
 #include "features/rs6000/powerpc-32.c"
 #include "features/rs6000/powerpc-altivec32.c"
 #include "features/rs6000/powerpc-vsx32.c"
@@ -148,6 +152,11 @@ struct rs6000_framedata
     int vrsave_offset;          /* offset of saved vrsave register */
   };
 
+static int
+rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
+		       CORE_ADDR addr);
+struct powerpc_opcode *
+lookup_powerpc (unsigned long insn, ppc_cpu_t dialect);
 
 /* Is REGNO a VSX register? Return 1 if so, 0 otherwise.  */
 int
@@ -4206,6 +4215,9 @@ rs6000_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
   else
     register_ppc_ravenscar_ops (gdbarch);
 
+  /* Support reverse debugging.  */
+  set_gdbarch_process_record (gdbarch, rs6000_process_record);
+
   return gdbarch;
 }
 
@@ -4424,4 +4436,548 @@ scalar type, thus assuming that the variable is accessed through the address\n\
 of its first byte."),
 			   NULL, show_powerpc_exact_watchpoints,
 			   &setpowerpccmdlist, &showpowerpccmdlist);
+}
+
+/* Parse the current instruction and record the values of the registers and
+   memory that will be changed in current instruction to "record_arch_list".
+   Return -1 if something wrong.  */
+
+static int
+rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
+		       CORE_ADDR addr)
+{
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+  uint32_t op;
+
+  if (record_debug > 1)
+    fprintf_unfiltered (gdb_stdlog, "Process record: rs6000_process_record "
+			            "addr = 0x%s\n",
+			paddress (target_gdbarch (), addr));
+
+  op = rs6000_fetch_instruction (gdbarch, addr);
+
+  switch (PPC_OP (op))
+    {
+    case 0x7:  /* mulli */
+    case 0xe:  /* addi */
+    case 0xf:  /* addis */
+    case 0x20: /* lwz */
+    case 0x2a: /* lha */
+      {
+	int reg = (op >> 21) & ((1<<5)-1);
+
+	if (record_full_arch_list_add_reg (regcache, reg))
+	  return -1;
+      }
+      break;
+
+    case 0x8:  /* subfic */
+      { 
+	int reg = (op >> 21) & ((1<<5)-1);
+
+	if (record_full_arch_list_add_reg (regcache, PPC_XER_REGNUM))
+	  return -1;
+	if (record_full_arch_list_add_reg (regcache, reg))
+	  return -1;
+      }
+      break;
+
+    case 0xa: /* cmpli */
+    case 0xb: /* cmpi */
+      if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
+	return -1;
+      break;
+
+    case 0xd: /* addic. */
+      { 
+	int reg = (op >> 21) & ((1<<5)-1);
+
+	if (record_full_arch_list_add_reg (regcache, PPC_XER_REGNUM))
+	  return -1;
+	if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
+	  return -1;
+	if (record_full_arch_list_add_reg (regcache, reg))
+	  return -1;
+      }
+      break;
+
+    case 0x10: /* bc */
+      if (record_full_arch_list_add_reg (regcache, PPC_LR_REGNUM))
+	return -1;
+      if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
+	return -1;
+      break;
+
+    case 0x11: /* sc */
+      if (record_full_arch_list_add_reg (regcache, PPC_MSR_REGNUM))
+	return -1;
+      /* Also SRR0 and SRR1, but not implementing supervisory instructions here */
+      break;
+
+    case 0x12: /* b */
+      {
+	if (record_full_arch_list_add_reg (regcache, PPC_LR_REGNUM))
+	  return -1;
+      }
+      break;
+
+    case 0x13:
+      {
+	switch ((op >> 1) & ((1<<10)-1))
+	  {
+	  case 0x0: /* mcrf */
+	    if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
+	      return -1;
+	    break;
+	    
+	  case 0x10: /* bclr */
+	    if (record_full_arch_list_add_reg (regcache, PPC_LR_REGNUM))
+	      return -1;
+	    if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
+	      return -1;
+	    break;
+
+	  case 0xc1: /* crxor */
+	    if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
+	      return -1;
+	    break;
+
+	  case 0x96: /* isync */
+	    break;
+
+	  case 0x210: /* bcctr */
+	    if (record_full_arch_list_add_reg (regcache, PPC_LR_REGNUM))
+	      return -1;
+	    break;
+	  default:
+	    printf_unfiltered (_("Process record: unrecognized instruction "
+				 "0x13 opcode 0x%x at addr 0x%s.\n"), 
+			       ((op >> 1) & ((1<<10)-1)),
+			       paddress (target_gdbarch (), addr));
+	    return -1;
+	  }
+      }
+      break;
+	
+    case 0x14: /* rlwimi */
+    case 0x15: /* rlwinm */
+    case 0x1c: /* andi. */
+    case 0x1e: /* rldicl, rldicr */
+      {
+	int reg = (op >> 16) & ((1<<5)-1);
+
+	if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
+	  return -1;
+	if (record_full_arch_list_add_reg (regcache, reg))
+	  return -1;
+      }
+      break;
+
+    case 0x18: /* ori */
+    case 0x19: /* oris */
+    case 0x1a: /* xori */
+    case 0x1b: /* xoris */
+      {
+	int reg = (op >> 16) & ((1<<5)-1);
+
+	if (record_full_arch_list_add_reg (regcache, reg))
+	  return -1;
+	break;
+      }
+
+    case 0x1f:
+      {
+	int reg;
+	switch ((op >> 1) & ((1<<10)-1))
+	  {
+	  case 0x0:  /* cmp */
+	  case 0x20: /* cmpl */
+	    if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
+	      return -1;
+	    break;
+	    
+	  case 0x9: /* mulhdu */
+	    if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
+	      return -1;
+	    reg = (op >> 21) & ((1<<5)-1);
+	    if (record_full_arch_list_add_reg (regcache, reg))
+	      return -1;
+	    break;
+
+	  case 0x13:  /* mfcr */
+	  case 0x14:  /* lwarx */
+	  case 0x15:  /* ldx */
+	  case 0x17:  /* lwzx */
+	  case 0x54:  /* ldarx */
+	  case 0x57:  /* lbzx */
+	  case 0x117: /* lhzx */
+	  case 0x155: /* lwax */
+	    reg = (op >> 21) & ((1<<5)-1);
+	    if (record_full_arch_list_add_reg (regcache, reg))
+	      return -1;
+	    break;
+
+	  case 0x90: /* mtcrf */
+	    if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
+	      return -1;
+	    break;
+
+	  case 0x28:  /* subf */
+	  case 0x68:  /* neg */
+	  case 0x88:  /* subfe */
+	  case 0x8a:  /* adde */
+	  case 0xe9:  /* mulld */
+	  case 0xeb:  /* mullw */
+	  case 0x10a: /* add */
+	  case 0x1c9: /* divdu */
+	    if (record_full_arch_list_add_reg (regcache, PPC_XER_REGNUM))
+	      return -1;
+	    if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
+	      return -1;
+	    reg = (op >> 21) & ((1<<5)-1);
+	    if (record_full_arch_list_add_reg (regcache, reg))
+	      return -1;
+	    break;
+
+	  case 0x36:  /* dcbst */
+	  case 0x56:  /* dcbf */
+	  case 0x116: /* dcbt */
+	  case 0x256: /* sync */
+	  case 0x3f6: /* sync */
+	    break;
+
+	  case 0x318: /* sraw */
+	  case 0x33a: /* sradi */
+	  case 0x33b: /* sradi */
+	    if (record_full_arch_list_add_reg (regcache, PPC_XER_REGNUM))
+	      return -1;
+	    /* fall through... */
+	  case 0x8:   /* rldcl */
+	  case 0x18:  /* slw */
+	  case 0x1a:  /* cntlzw */
+	  case 0x1c:  /* and */
+	  case 0x3a:  /* cntlzd */
+	  case 0x3c:  /* andc */
+	  case 0x7c:  /* nor */
+	  case 0x11c: /* eqv */
+	  case 0x13c: /* xor */
+	  case 0x1bc: /* or */
+	  case 0x19c: /* orc */
+	  case 0x21b: /* srd */
+	  case 0x39a: /* extsh */
+	  case 0x3da: /* extsw */
+	    if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
+	      return -1;
+	    /* fall through... */
+	  case 0x153: /* mfspr */
+	    reg = (op >> 16) & ((1<<5)-1);
+	    if (record_full_arch_list_add_reg (regcache, reg))
+	      return -1;
+	    break;
+
+	  case 0x95: /* stdx */
+	    {
+	      CORE_ADDR rAa, rBa;
+	      int regS = (op >> 21) & ((1<<5)-1);
+	      int regA = (op >> 16) & ((1<<5)-1);
+	      int regB = (op >> 11) & ((1<<5)-1);
+
+	      if (regA)
+		regcache_raw_read_unsigned (regcache, regA, &rAa);
+	      else
+		rAa = 0;
+	      regcache_raw_read_unsigned (regcache, regB, &rBa);
+	
+	      if (record_full_arch_list_add_mem (rAa + rBa, 8))
+		return -1;
+	    }
+	    break;
+
+	  case 0xb5: /* stdux */
+	    {
+	      CORE_ADDR rAa, rBa;
+	      int regS = (op >> 21) & ((1<<5)-1);
+	      int regA = (op >> 16) & ((1<<5)-1);
+	      int regB = (op >> 11) & ((1<<5)-1);
+
+	      if (record_full_arch_list_add_reg (regcache, regA))
+		return -1;
+
+	      regcache_raw_read_unsigned (regcache, regA, &rAa);
+	      regcache_raw_read_unsigned (regcache, regB, &rBa);
+	
+	      if (record_full_arch_list_add_mem (rAa + rBa, 8))
+		return -1;
+	    }
+	    break;
+
+	  case 0xd7: /* stbx */
+	    {
+	      CORE_ADDR rAa, rBa;
+	      int regS = (op >> 21) & ((1<<5)-1);
+	      int regA = (op >> 16) & ((1<<5)-1);
+	      int regB = (op >> 11) & ((1<<5)-1);
+
+	      if (regA)
+		regcache_raw_read_unsigned (regcache, regA, &rAa);
+	      else
+		rAa = 0;
+	      regcache_raw_read_unsigned (regcache, regB, &rBa);
+	
+	      if (record_full_arch_list_add_mem (rAa + rBa, 1))
+		return -1;
+	    }
+	    break;
+
+	  case 0x197: /* sthx */
+	    {
+	      CORE_ADDR rAa, rBa;
+	      int regS = (op >> 21) & ((1<<5)-1);
+	      int regA = (op >> 16) & ((1<<5)-1);
+	      int regB = (op >> 11) & ((1<<5)-1);
+
+	      if (regA)
+		regcache_raw_read_unsigned (regcache, regA, &rAa);
+	      else
+		rAa = 0;
+	      regcache_raw_read_unsigned (regcache, regB, &rBa);
+	
+	      if (record_full_arch_list_add_mem (rAa + rBa, 2))
+		return -1;
+	    }
+	    break;
+
+	  case 0x1d3: /* mtspr */
+	    reg = (op >> 11) & ((1<<10)-1);
+	    switch (reg)
+	      {
+	      case 0x100: /* lr */
+		if (record_full_arch_list_add_reg (regcache, PPC_LR_REGNUM))
+		  return -1;
+		break;
+
+	      case 0x120: /* ctr */
+		if (record_full_arch_list_add_reg (regcache, PPC_CTR_REGNUM))
+		  return -1;
+		break;
+
+	      default:
+		printf_unfiltered (_("Process record: unrecognized mtspr SPR 0x%x"
+				     " at addr 0x%s.\n"), 
+				   reg, paddress (target_gdbarch (), addr));
+		return -1;
+	      }
+	    break;
+
+	  case 0x338: /* srawi */
+	    if (record_full_arch_list_add_reg (regcache, PPC_XER_REGNUM))
+	      return -1;
+	    if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
+	      return -1;
+	    reg = (op >> 16) & ((1<<5)-1);
+	    if (record_full_arch_list_add_reg (regcache, reg))
+	      return -1;
+	    break;
+
+	  default:
+	    printf_unfiltered (_("Process record: unrecognized instruction 0x1F opcode 0x%x"
+				 " at addr 0x%s.\n"), 
+			       ((op >> 1) & ((1<<10)-1)), paddress (target_gdbarch (), addr));
+	    return -1;
+	  }
+	break;
+      }
+
+    case 0x21: /* lwzu */
+    case 0x23: /* lbzu */
+    case 0x29: /* lhzu */
+      {
+	int regT = (op >> 21) & ((1<<5)-1);
+	int regA = (op >> 16) & ((1<<5)-1);
+
+	if (record_full_arch_list_add_reg (regcache, regA))
+	  return -1;
+	if (record_full_arch_list_add_reg (regcache, regT))
+	  return -1;
+      }      
+      break;
+
+    case 0x22: /* lbz */
+    case 0x28: /* lhz */
+    case 0x3a: /* ld */
+      {
+	int regT = (op >> 21) & ((1<<5)-1);
+
+	if (record_full_arch_list_add_reg (regcache, regT))
+	  return -1;
+      }      
+      break;
+
+    case 0x24: /* stw */
+    case 0x34: /* stfs */
+      {
+	CORE_ADDR addr;
+	int regS = (op >> 21) & ((1<<5)-1);
+	int regA = (op >> 16) & ((1<<5)-1);
+	int32_t offset = (((int32_t)op & 0xFFFF) << 16) >> 16;
+
+	if (regA == 0)
+	  addr = 0;
+	else
+	  regcache_raw_read_unsigned (regcache, regA, &addr);
+	
+	if (record_full_arch_list_add_mem (addr + offset, 4))
+	  return -1;
+      }
+      break;
+
+    case 0x25: /* stwu */
+      {
+	CORE_ADDR addr;
+	int regS = (op >> 21) & ((1<<5)-1);
+	int regA = (op >> 16) & ((1<<5)-1);
+	int32_t offset = (((int32_t)op & 0xFFFF) << 16) >> 16;
+
+	if (record_full_arch_list_add_reg (regcache, regA))
+	  return -1;
+
+	regcache_raw_read_unsigned (regcache, regA, &addr);
+	
+	if (record_full_arch_list_add_mem (addr + offset, 4))
+	  return -1;
+      }
+      break;
+
+    case 0x26: /* stb */
+      {
+	CORE_ADDR addr;
+	int regS = (op >> 21) & ((1<<5)-1);
+	int regA = (op >> 16) & ((1<<5)-1);
+	int32_t offset = (((int32_t)op & 0xFFFF) << 16) >> 16;
+
+	if (regA == 0)
+	  addr = 0;
+	else
+	  regcache_raw_read_unsigned (regcache, regA, &addr);
+	
+	if (record_full_arch_list_add_mem (addr + offset, 1))
+	  return -1;
+      }
+      break;
+
+    case 0x27: /* stbu */
+      {
+	CORE_ADDR addr;
+	int regS = (op >> 21) & ((1<<5)-1);
+	int regA = (op >> 16) & ((1<<5)-1);
+	int32_t offset = (((int32_t)op & 0xFFFF) << 16) >> 16;
+
+	if (record_full_arch_list_add_reg (regcache, regA))
+	  return -1;
+
+	regcache_raw_read_unsigned (regcache, regA, &addr);
+	
+	if (record_full_arch_list_add_mem (addr + offset, 1))
+	  return -1;
+      }
+      break;
+
+    case 0x2c: /* sth */
+      {
+	CORE_ADDR addr;
+	int regS = (op >> 21) & ((1<<5)-1);
+	int regA = (op >> 16) & ((1<<5)-1);
+	int32_t offset = (((int32_t)op & 0xFFFF) << 16) >> 16;
+
+	if (regA == 0)
+	  addr = 0;
+	else
+	  regcache_raw_read_unsigned (regcache, regA, &addr);
+	
+	if (record_full_arch_list_add_mem (addr + offset, 2))
+	  return -1;
+      }
+      break;
+
+    case 0x2d: /* sthu */
+      {
+	CORE_ADDR addr;
+	int regS = (op >> 21) & ((1<<5)-1);
+	int regA = (op >> 16) & ((1<<5)-1);
+	int32_t offset = (((int32_t)op & 0xFFFF) << 16) >> 16;
+
+	if (record_full_arch_list_add_reg (regcache, regA))
+	  return -1;
+
+	regcache_raw_read_unsigned (regcache, regA, &addr);
+	
+	if (record_full_arch_list_add_mem (addr + offset, 2))
+	  return -1;
+      }
+      break;
+
+    case 0x30: /* lfs */
+    case 0x32: /* lfd */
+      {
+	int regT = (op >> 21) & ((1<<5)-1);
+
+	if (record_full_arch_list_add_reg (regcache, PPC_F0_REGNUM + regT))
+	  return -1;
+      }      
+      break;
+
+    case 0x36: /* stfd */
+    case 0x3e: /* std */
+      {
+	CORE_ADDR addr;
+	int regS = (op >> 21) & ((1<<5)-1);
+	int regA = (op >> 16) & ((1<<5)-1);
+	int32_t offset = (((int32_t)op & 0xFFFF) << 16) >> 16;
+
+	if (regA == 0)
+	  addr = 0;
+	else
+	  regcache_raw_read_unsigned (regcache, regA, &addr);
+	
+	if (record_full_arch_list_add_mem (addr + offset, 8))
+	  return -1;
+      }
+      break;
+
+    case 0x3f:
+      {
+	int reg;
+
+	switch ((op >> 1) & ((1<<10)-1))
+	  {
+	  case 0x48: /* fmr */
+	    {
+	      int regT = (op >> 21) & ((1<<5)-1);
+	      if (record_full_arch_list_add_reg (regcache, PPC_F0_REGNUM + regT))
+		return -1;
+	    }
+	    break;
+
+	  default:
+	    printf_unfiltered (_("Process record: unrecognized instruction 0x3F opcode 0x%x"
+				 " at addr 0x%s.\n"), 
+			       ((op >> 1) & ((1<<10)-1)), paddress (target_gdbarch (), addr));
+	    return -1;
+	  }
+      }
+      break;
+
+    default:
+      printf_unfiltered (_("Process record: unrecognized instruction opcode 0x%x"
+			   " at addr 0x%s.\n"), 
+			 PPC_OP (op), paddress (target_gdbarch (), addr));
+      return -1;
+    }
+
+  if (record_full_arch_list_add_reg (regcache, PPC_PC_REGNUM))
+    return -1;
+  if (record_full_arch_list_add_end ())
+    return -1;
+
+  return 0;
 }

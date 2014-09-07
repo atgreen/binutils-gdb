@@ -240,7 +240,7 @@ set signals {
     61
     62
     63
-    TERM
+#    TERM
 }
 
 # Make the first signal SIGABRT because it is always supported.
