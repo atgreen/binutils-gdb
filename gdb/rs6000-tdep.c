@@ -4462,6 +4462,8 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
     case 0xe:  /* addi */
     case 0xf:  /* addis */
     case 0x20: /* lwz */
+    case 0x22: /* lbz */
+    case 0x28: /* lhz */
     case 0x2a: /* lha */
       {
 	int reg = (op >> 21) & ((1<<5)-1);
@@ -4504,7 +4506,7 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
     case 0x10: /* bc */
       if (record_full_arch_list_add_reg (regcache, PPC_LR_REGNUM))
 	return -1;
-      if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
+      if (record_full_arch_list_add_reg (regcache, PPC_CTR_REGNUM))
 	return -1;
       break;
 
@@ -4515,10 +4517,8 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
       break;
 
     case 0x12: /* b */
-      {
-	if (record_full_arch_list_add_reg (regcache, PPC_LR_REGNUM))
-	  return -1;
-      }
+      if (record_full_arch_list_add_reg (regcache, PPC_LR_REGNUM))
+	return -1;
       break;
 
     case 0x13:
@@ -4533,16 +4533,22 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
 	  case 0x10: /* bclr */
 	    if (record_full_arch_list_add_reg (regcache, PPC_LR_REGNUM))
 	      return -1;
-	    if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
-	      return -1;
-	    break;
-
-	  case 0xc1: /* crxor */
-	    if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
+	    if (record_full_arch_list_add_reg (regcache, PPC_CTR_REGNUM))
 	      return -1;
 	    break;
 
 	  case 0x96: /* isync */
+	    break;
+
+	  case 0x81:  /* crandc */
+	  case 0xc1:  /* crxor */
+	  case 0xe1:  /* crnand */
+	  case 0x101: /* crand */
+	  case 0x121: /* creqv */
+	  case 0x1a1: /* crorc */
+	  case 0x1c1: /* cror */
+	    if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
+	      return -1;
 	    break;
 
 	  case 0x210: /* bcctr */
@@ -4562,7 +4568,7 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
     case 0x14: /* rlwimi */
     case 0x15: /* rlwinm */
     case 0x1c: /* andi. */
-    case 0x1e: /* rldicl, rldicr */
+    case 0x1e: /* rldicl, rldicr, rldic[.], rldimi[.], rldcl[.], rldcr[.] */
       {
 	int reg = (op >> 16) & ((1<<5)-1);
 
@@ -4596,32 +4602,7 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
 	      return -1;
 	    break;
 	    
-	  case 0x9: /* mulhdu */
-	    if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
-	      return -1;
-	    reg = (op >> 21) & ((1<<5)-1);
-	    if (record_full_arch_list_add_reg (regcache, reg))
-	      return -1;
-	    break;
-
-	  case 0x13:  /* mfcr */
-	  case 0x14:  /* lwarx */
-	  case 0x15:  /* ldx */
-	  case 0x17:  /* lwzx */
-	  case 0x54:  /* ldarx */
-	  case 0x57:  /* lbzx */
-	  case 0x117: /* lhzx */
-	  case 0x155: /* lwax */
-	    reg = (op >> 21) & ((1<<5)-1);
-	    if (record_full_arch_list_add_reg (regcache, reg))
-	      return -1;
-	    break;
-
-	  case 0x90: /* mtcrf */
-	    if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
-	      return -1;
-	    break;
-
+	  case 0x8:   /* subfc[o][.] */
 	  case 0x28:  /* subf */
 	  case 0x68:  /* neg */
 	  case 0x88:  /* subfe */
@@ -4639,20 +4620,48 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
 	      return -1;
 	    break;
 
+	  case 0x9: /* mulhdu */
+	    if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
+	      return -1;
+	    reg = (op >> 21) & ((1<<5)-1);
+	    if (record_full_arch_list_add_reg (regcache, reg))
+	      return -1;
+	    break;
+
+	  case 0x13:  /* mfcr/mfocr */
+	  case 0x14:  /* lwarx */
+	  case 0x15:  /* ldx */
+	  case 0x17:  /* lwzx */
+	  case 0x54:  /* ldarx */
+	  case 0x57:  /* lbzx */
+	  case 0x117: /* lhzx */
+	  case 0x153: /* mfspr */
+	  case 0x155: /* lwax */
+	    reg = (op >> 21) & ((1<<5)-1);
+	    if (record_full_arch_list_add_reg (regcache, reg))
+	      return -1;
+	    break;
+
+	  case 0x90: /* mtcrf/mtocrf */
+	    if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
+	      return -1;
+	    break;
+
 	  case 0x36:  /* dcbst */
 	  case 0x56:  /* dcbf */
 	  case 0x116: /* dcbt */
 	  case 0x256: /* sync */
-	  case 0x3f6: /* sync */
+	  case 0x3f6: /* dcbz */
 	    break;
 
-	  case 0x318: /* sraw */
-	  case 0x33a: /* sradi */
-	  case 0x33b: /* sradi */
+	  case 0x33a: /* sradi[.] */
+	  case 0x33b: /* sradi[.] */
+	  case 0x31a: /* sraw[.] */
+	  case 0x318: /* srad[.] */
+	  case 0x338: /* srawi[.] */
 	    if (record_full_arch_list_add_reg (regcache, PPC_XER_REGNUM))
 	      return -1;
 	    /* fall through... */
-	  case 0x8:   /* rldcl */
 	  case 0x18:  /* slw */
 	  case 0x1a:  /* cntlzw */
 	  case 0x1c:  /* and */
@@ -4668,8 +4677,6 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
 	  case 0x3da: /* extsw */
 	    if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
 	      return -1;
-	    /* fall through... */
-	  case 0x153: /* mfspr */
 	    reg = (op >> 16) & ((1<<5)-1);
 	    if (record_full_arch_list_add_reg (regcache, reg))
 	      return -1;
@@ -4678,7 +4685,6 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
 	  case 0x95: /* stdx */
 	    {
 	      CORE_ADDR rAa, rBa;
-	      int regS = (op >> 21) & ((1<<5)-1);
 	      int regA = (op >> 16) & ((1<<5)-1);
 	      int regB = (op >> 11) & ((1<<5)-1);
 
@@ -4696,7 +4702,6 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
 	  case 0xb5: /* stdux */
 	    {
 	      CORE_ADDR rAa, rBa;
-	      int regS = (op >> 21) & ((1<<5)-1);
 	      int regA = (op >> 16) & ((1<<5)-1);
 	      int regB = (op >> 11) & ((1<<5)-1);
 
@@ -4714,7 +4719,6 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
 	  case 0xd7: /* stbx */
 	    {
 	      CORE_ADDR rAa, rBa;
-	      int regS = (op >> 21) & ((1<<5)-1);
 	      int regA = (op >> 16) & ((1<<5)-1);
 	      int regB = (op >> 11) & ((1<<5)-1);
 
@@ -4732,7 +4736,6 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
 	  case 0x197: /* sthx */
 	    {
 	      CORE_ADDR rAa, rBa;
-	      int regS = (op >> 21) & ((1<<5)-1);
 	      int regA = (op >> 16) & ((1<<5)-1);
 	      int regB = (op >> 11) & ((1<<5)-1);
 
@@ -4769,16 +4772,6 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
 	      }
 	    break;
 
-	  case 0x338: /* srawi */
-	    if (record_full_arch_list_add_reg (regcache, PPC_XER_REGNUM))
-	      return -1;
-	    if (record_full_arch_list_add_reg (regcache, PPC_CR_REGNUM))
-	      return -1;
-	    reg = (op >> 16) & ((1<<5)-1);
-	    if (record_full_arch_list_add_reg (regcache, reg))
-	      return -1;
-	    break;
-
 	  default:
 	    printf_unfiltered (_("Process record: unrecognized instruction 0x1F opcode 0x%x"
 				 " at addr 0x%s.\n"), 
@@ -4802,22 +4795,10 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
       }      
       break;
 
-    case 0x22: /* lbz */
-    case 0x28: /* lhz */
-    case 0x3a: /* ld */
-      {
-	int regT = (op >> 21) & ((1<<5)-1);
-
-	if (record_full_arch_list_add_reg (regcache, regT))
-	  return -1;
-      }      
-      break;
-
     case 0x24: /* stw */
     case 0x34: /* stfs */
       {
 	CORE_ADDR addr;
-	int regS = (op >> 21) & ((1<<5)-1);
 	int regA = (op >> 16) & ((1<<5)-1);
 	int32_t offset = (((int32_t)op & 0xFFFF) << 16) >> 16;
 
@@ -4834,7 +4815,6 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
     case 0x25: /* stwu */
       {
 	CORE_ADDR addr;
-	int regS = (op >> 21) & ((1<<5)-1);
 	int regA = (op >> 16) & ((1<<5)-1);
 	int32_t offset = (((int32_t)op & 0xFFFF) << 16) >> 16;
 
@@ -4851,7 +4831,6 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
     case 0x26: /* stb */
       {
 	CORE_ADDR addr;
-	int regS = (op >> 21) & ((1<<5)-1);
 	int regA = (op >> 16) & ((1<<5)-1);
 	int32_t offset = (((int32_t)op & 0xFFFF) << 16) >> 16;
 
@@ -4868,7 +4847,6 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
     case 0x27: /* stbu */
       {
 	CORE_ADDR addr;
-	int regS = (op >> 21) & ((1<<5)-1);
 	int regA = (op >> 16) & ((1<<5)-1);
 	int32_t offset = (((int32_t)op & 0xFFFF) << 16) >> 16;
 
@@ -4885,7 +4863,6 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
     case 0x2c: /* sth */
       {
 	CORE_ADDR addr;
-	int regS = (op >> 21) & ((1<<5)-1);
 	int regA = (op >> 16) & ((1<<5)-1);
 	int32_t offset = (((int32_t)op & 0xFFFF) << 16) >> 16;
 
@@ -4927,10 +4904,8 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
       break;
 
     case 0x36: /* stfd */
-    case 0x3e: /* std */
       {
 	CORE_ADDR addr;
-	int regS = (op >> 21) & ((1<<5)-1);
 	int regA = (op >> 16) & ((1<<5)-1);
 	int32_t offset = (((int32_t)op & 0xFFFF) << 16) >> 16;
 
@@ -4941,6 +4916,81 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
 	
 	if (record_full_arch_list_add_mem (addr + offset, 8))
 	  return -1;
+      }
+      break;
+
+    case 0x3a: 
+      {
+	int reg;
+
+	switch (op & 0x3)
+	  {
+	  case 0x1: /* ldu */
+	    {
+	      reg = (op >> 16) & ((1<<5)-1);
+	      if (record_full_arch_list_add_reg (regcache, reg))
+		return -1;
+	    }
+	    /* fall though... */
+	  case 0x0: /* ld */
+	  case 0x2: /* lwa */
+	    {
+	      reg = (op >> 21) & ((1<<5)-1);
+	      if (record_full_arch_list_add_reg (regcache, reg))
+		return -1;
+	    }
+	    break;
+	  default:
+	    printf_unfiltered (_("Process record: unrecognized instruction 0x3a opcode 0x%x"
+				 " at addr 0x%s.\n"), 
+			       (op & 0x3), paddress (target_gdbarch (), addr));
+	  }
+      }
+      break;
+
+    case 0x3e: 
+      {
+	int reg;
+
+	switch (op & 0x3)
+	  {
+	  case 0x0: /* std */
+	    {
+	      CORE_ADDR addr;
+	      int regA = (op >> 16) & ((1<<5)-1);
+	      int32_t offset = (((int32_t)op & 0xFFFF) << 16) >> 16;
+	      
+	      if (regA == 0)
+		addr = 0;
+	      else
+		regcache_raw_read_unsigned (regcache, regA, &addr);
+	      
+	      if (record_full_arch_list_add_mem (addr + offset, 8))
+		return -1;
+	    }
+	    break;
+
+	  case 0x1: /* stdu */
+	    {
+	      CORE_ADDR addr;
+	      int regA = (op >> 16) & ((1<<5)-1);
+	      int32_t offset = (((int32_t)op & 0xFFFF) << 16) >> 16;
+	      
+	      if (record_full_arch_list_add_reg (regcache, regA))
+		return -1;
+	      
+	      regcache_raw_read_unsigned (regcache, regA, &addr);
+	      
+	      if (record_full_arch_list_add_mem (addr + offset, 4))
+		return -1;
+	    }
+	    break;
+
+	  default:
+	    printf_unfiltered (_("Process record: unrecognized instruction 0x3e opcode 0x%x"
+				 " at addr 0x%s.\n"), 
+			       (op & 0x3), paddress (target_gdbarch (), addr));
+	  }
       }
       break;
 
