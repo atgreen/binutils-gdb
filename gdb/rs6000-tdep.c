@@ -4649,6 +4649,7 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
 
 	  case 0x36:  /* dcbst */
 	  case 0x56:  /* dcbf */
+	  case 0xf6:  /* dcbtst */
 	  case 0x116: /* dcbt */
 	  case 0x256: /* sync */
 	  case 0x3f6: /* dcbz */
