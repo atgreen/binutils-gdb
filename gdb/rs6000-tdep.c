@@ -4568,6 +4568,7 @@ rs6000_process_record (struct gdbarch *gdbarch, struct regcache *regcache,
     case 0x14: /* rlwimi */
     case 0x15: /* rlwinm */
     case 0x1c: /* andi. */
+    case 0x1d: /* andis. */
     case 0x1e: /* rldicl, rldicr, rldic[.], rldimi[.], rldcl[.], rldcr[.] */
       {
 	int reg = (op >> 16) & ((1<<5)-1);
