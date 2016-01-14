@@ -17,6 +17,8 @@
    Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston, MA
    02110-1301, USA.  */
 
+#include <stdint.h>
+
 /* Form 1 instructions come in different flavors:
 
     Some have no arguments                          (MOXIE_F1_NARG)
@@ -65,10 +67,11 @@
 typedef struct moxie_opc_info_t
 {
   short         opcode;
+  uint32_t      mixie_code;
   unsigned      itype;
   const char *  name;
 } moxie_opc_info_t;
 
-extern const moxie_opc_info_t moxie_form1_opc_info[128];
-extern const moxie_opc_info_t moxie_form2_opc_info[4];
-extern const moxie_opc_info_t moxie_form3_opc_info[16];
+extern moxie_opc_info_t moxie_form1_opc_info[128];
+extern moxie_opc_info_t moxie_form2_opc_info[4];
+extern moxie_opc_info_t moxie_form3_opc_info[16];

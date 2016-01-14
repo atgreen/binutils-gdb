@@ -500,7 +500,7 @@ disassembler (abfd)
 #endif
 #ifdef ARCH_moxie
     case bfd_arch_moxie:
-      disassemble = print_insn_moxie;
+      disassemble = moxie_get_disassembler (abfd);
       break;
 #endif
 #ifdef ARCH_iq2000

@@ -47,10 +47,103 @@ static valueT md_chars_to_number (char * buf, int n);
 /* Byte order.  */
 extern int target_big_endian;
 
+/* Generate mixie opcodes?  */
+static int target_mixie = 0;
+
 void
 md_operand (expressionS *op __attribute__((unused)))
 {
   /* Empty for now. */
+}
+
+#include <stdint.h>
+
+/* The state must be seeded from MOXIE_MIXIE_KEY. */
+bfd_uint64_t mixie_seed[2] = {0, 0};
+
+static bfd_uint64_t
+xorshift128plus (void)
+{
+  bfd_uint64_t x = mixie_seed[0];
+  bfd_uint64_t const y = mixie_seed[1];
+  mixie_seed[0] = y;
+  x ^= x << 23;
+  mixie_seed[1] = x ^ y ^ (x >> 17) ^ (y >> 26);
+  return mixie_seed[1] + y;
+}
+
+static uint32_t
+next_mixie_code (void)
+{
+  static int i = 2;
+  static bfd_uint64_t value;
+
+  switch (i)
+    {
+    case 0:
+      i++;
+      return (value & 0xffffffff);
+    case 1:
+      i++;
+      return ((value >> 32) & 0xffffffff);
+    case 2:
+      i = 0;
+      value = xorshift128plus ();
+      return next_mixie_code ();
+    default:
+      as_fatal (_("internal error"));
+    }
+}
+
+static bfd_uint64_t
+mix_64_key_bits (char *key)
+{
+  int i;
+  bfd_uint64_t seed64 = 0;
+    
+  for (i = 0; i < 8; i++)
+    {
+      int v;
+      
+      if (key[i] >= '0' && key[i] <= '9')
+	v = key[i] - '0';
+      else if (key[i] >= 'A' && key[i] <= 'F')
+	v = key[i] - 'A' + 10;
+      else if (key[i] >= 'a' && key[i] <= 'f')
+	v = key[i] - 'a' + 10;
+      else
+	as_fatal (_("MOXIE_MIXIE_KEY must be set to a non-zero 128-bit hex key"));
+
+      seed64 += (seed64 << 8) + v;
+
+      while (v-- > 0)
+	xorshift128plus();
+    }
+
+  return seed64;
+}
+
+static void
+fill_mixie_opcodes (void)
+{
+  unsigned count;
+  moxie_opc_info_t *opcode;
+  
+  char *key = getenv ("MOXIE_MIXIE_KEY");
+  if (!key || strlen (key) != 16)
+    as_fatal (_("MOXIE_MIXIE_KEY must be set to a non-zero 128-bit hex key"));
+
+  mixie_seed[0] = mix_64_key_bits (&key[0]);
+  mixie_seed[1] = mix_64_key_bits (&key[8]);
+    
+  for (count = 0, opcode = moxie_form1_opc_info; count++ < 64; opcode++)
+    opcode->mixie_code = next_mixie_code ();
+
+  for (count = 0, opcode = moxie_form2_opc_info; count++ < 4; opcode++)
+    opcode->mixie_code = next_mixie_code ();
+
+  for (count = 0, opcode = moxie_form3_opc_info; count++ < 10; opcode++)
+    opcode->mixie_code = next_mixie_code ();
 }
 
 /* This function is called once, at assembler startup time.  It sets
@@ -64,6 +157,8 @@ md_begin (void)
   const moxie_opc_info_t *opcode;
   opcode_hash_control = hash_new ();
 
+  fill_mixie_opcodes ();
+  
   /* Insert names into hash table.  */
   for (count = 0, opcode = moxie_form1_opc_info; count++ < 64; opcode++)
     hash_insert (opcode_hash_control, opcode->name, (char *) opcode);
@@ -540,6 +635,12 @@ md_assemble (char *str)
     }
 
   md_number_to_chars (p, iword, 2);
+  /* Insert a mixie opcode suffix if required.  */
+  if (target_mixie)
+    {
+      p = frag_more (4);
+      md_number_to_chars (p, opcode->mixie_code, 4);
+    }
 
   while (ISSPACE (*op_end))
     op_end++;
@@ -596,12 +697,14 @@ md_atof (int type, char *litP, int *sizeP)
 
 enum options
 {
-  OPTION_EB = OPTION_MD_BASE,
+  OPTION_MIXIE = OPTION_MD_BASE,
+  OPTION_EB,
   OPTION_EL,
 };
 
 struct option md_longopts[] =
 {
+  { "mixie",       no_argument, NULL, OPTION_MIXIE}, 
   { "EB",          no_argument, NULL, OPTION_EB},
   { "EL",          no_argument, NULL, OPTION_EL},
   { NULL,          no_argument, NULL, 0}
@@ -616,6 +719,10 @@ md_parse_option (int c ATTRIBUTE_UNUSED, char *arg ATTRIBUTE_UNUSED)
 {
   switch (c)
     {
+    case OPTION_MIXIE:
+      target_mixie = 1;
+      fill_mixie_opcodes ();
+      break;
     case OPTION_EB: 
       target_big_endian = 1; 
       break;
@@ -633,6 +740,7 @@ void
 md_show_usage (FILE *stream ATTRIBUTE_UNUSED)
 {
   fprintf (stream, _("\
+  -mixie                  generate mixie opcode suffixes\n\
   -EB                     assemble for a big endian system (default)\n\
   -EL                     assemble for a little endian system\n"));
 }
@@ -841,4 +949,12 @@ md_pcrel_from (fixS *fixP)
       abort ();
       return addr;
     }
+}
+
+/* Some special processing for a Moxie ELF file.  */
+
+void
+moxie_elf_final_processing (void)
+{
+  elf_elfheader (stdoutput)->e_flags = (target_mixie ? EF_MOXIE_MIXIE : 0);
 }

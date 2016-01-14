@@ -227,3 +227,24 @@ print_insn_moxie (bfd_vma addr, struct disassemble_info * info)
   info->memory_error_func (status, addr, info);
   return -1;
 }
+
+int
+print_insn_moxie_mixie (bfd_vma addr, struct disassemble_info * info)
+{
+  // mixie encodings include a 4 byte suffix
+  return (print_insn_moxie (addr, info) + 4);
+}
+
+/* Return disassembler function  */
+
+disassembler_ftype
+moxie_get_disassembler (bfd *abfd)
+{
+  if (abfd == NULL)
+    return print_insn_moxie;
+
+  if (bfd_get_mach (abfd) == bfd_mach_moxie_mixie)
+    return print_insn_moxie_mixie;
+  else
+    return print_insn_moxie;
+}

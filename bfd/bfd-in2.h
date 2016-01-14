@@ -2162,6 +2162,7 @@ enum bfd_architecture
 #define bfd_mach_fr550         550
   bfd_arch_moxie,       /* The moxie processor */
 #define bfd_mach_moxie         1
+#define bfd_mach_moxie_mixie   2
   bfd_arch_mcore,
   bfd_arch_mep,
 #define bfd_mach_mep           1

@@ -375,6 +375,7 @@ DESCRIPTION
 .#define bfd_mach_fr550		550
 .  bfd_arch_moxie,       {* The moxie processor *}
 .#define bfd_mach_moxie		1
+.#define bfd_mach_moxie_mixie   2
 .  bfd_arch_mcore,
 .  bfd_arch_mep,
 .#define bfd_mach_mep		1
@@ -673,6 +674,7 @@ static const bfd_arch_info_type * const bfd_archures_list[] =
     &bfd_mn10200_arch,
     &bfd_mn10300_arch,
     &bfd_moxie_arch,
+    &bfd_moxie_mixie_arch,
     &bfd_msp430_arch,
     &bfd_mt_arch,
     &bfd_nds32_arch,

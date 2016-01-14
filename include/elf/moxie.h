@@ -29,4 +29,8 @@ START_RELOC_NUMBERS (elf_moxie_reloc_type)
   RELOC_NUMBER (R_MOXIE_PCREL10, 2)
 END_RELOC_NUMBERS (R_MOXIE_max)
 
+/* Processor specific flags for the Elf header e_flags field.  */
+
+#define EF_MOXIE_MIXIE 0x00000001
+
 #endif /* _ELF_MOXIE_H */

@@ -272,6 +272,7 @@ extern int print_insn_mmix		(bfd_vma, disassemble_info *);
 extern int print_insn_mn10200		(bfd_vma, disassemble_info *);
 extern int print_insn_mn10300		(bfd_vma, disassemble_info *);
 extern int print_insn_moxie		(bfd_vma, disassemble_info *);
+extern int print_insn_moxie_mixie	(bfd_vma, disassemble_info *);
 extern int print_insn_msp430		(bfd_vma, disassemble_info *);
 extern int print_insn_mt                (bfd_vma, disassemble_info *);
 extern int print_insn_nds32		(bfd_vma, disassemble_info *);
@@ -308,6 +309,7 @@ extern int print_insn_rl78		(bfd_vma, disassemble_info *);
 
 extern disassembler_ftype arc_get_disassembler (void *);
 extern disassembler_ftype cris_get_disassembler (bfd *);
+extern disassembler_ftype moxie_get_disassembler (bfd *);
 
 extern void print_aarch64_disassembler_options (FILE *);
 extern void print_i386_disassembler_options (FILE *);

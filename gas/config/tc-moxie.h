@@ -45,3 +45,6 @@
 extern long md_pcrel_from (struct fix *);
 
 #define md_section_align(SEGMENT, SIZE)     (SIZE)
+
+#define elf_tc_final_processing moxie_elf_final_processing
+extern void moxie_elf_final_processing (void);

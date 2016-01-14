@@ -364,7 +364,23 @@ moxie_elf_check_relocs (bfd *abfd,
 
   return TRUE;
 }
+
+static bfd_boolean
+moxie_elf32_object_p (bfd *abfd)
+{
+  unsigned long mach;
+
+  mach = elf_elfheader (abfd)->e_flags;
+
+  if (mach == EF_MOXIE_MIXIE)
+    bfd_default_set_arch_mach (abfd, bfd_arch_moxie, bfd_mach_moxie_mixie);
+  else
+    bfd_default_set_arch_mach (abfd, bfd_arch_moxie, bfd_mach_moxie);
+    
+  return TRUE;
+}
 
+
 #define ELF_ARCH		bfd_arch_moxie
 #define ELF_MACHINE_CODE	EM_MOXIE
 #define ELF_MAXPAGESIZE		0x1
@@ -385,5 +401,7 @@ moxie_elf_check_relocs (bfd *abfd,
 
 #define bfd_elf32_bfd_reloc_type_lookup		moxie_reloc_type_lookup
 #define bfd_elf32_bfd_reloc_name_lookup		moxie_reloc_name_lookup
+
+#define elf_backend_object_p		        moxie_elf32_object_p
 
 #include "elf32-target.h"
